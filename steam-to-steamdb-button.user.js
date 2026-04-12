@@ -4,6 +4,7 @@
 // @version      1.1.8
 // @description  Adds a SteamDB button to Steam app, bundle, or sub pages in the appropriate action container.
 // @author       g31w0fw0rld
+// @license      MIT
 // @match        https://store.steampowered.com/app/*
 // @match        https://store.steampowered.com/bundle/*
 // @match        https://store.steampowered.com/sub/*
