@@ -8,7 +8,7 @@ Userscript de Tampermonkey que añade un botón a SteamDB en las páginas de Ste
 
 **Instalación:**
 1. Instala [Tampermonkey](https://www.tampermonkey.net/).
-2. Abre el instalador: [steam-to-steamdb-button.user.js](https://github.com/g31w0fw0rld/steam-to-steamdb-button/raw/main/steam-to-steamdb-button.user.js) (también en GreasyFork y OpenUserJS).
+2. Abre el instalador: [steam-to-steamdb-button.user.js](https://github.com/g31w0fw0rld/steam-to-steamdb-button/raw/main/steam-to-steamdb-button.user.js) (también en [GreasyFork](https://greasyfork.org/es-419/users/1590477-g31w) y [OpenUserJS](https://openuserjs.org/users/g31w0fw0rldgmail.com/scripts)).
 
 **Sitios:** `store.steampowered.com/app/*`, `/bundle/*`, `/sub/*`
 
@@ -18,7 +18,7 @@ Userscript de Tampermonkey que añade un botón a SteamDB en las páginas de Ste
 
 **Install:**
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
-2. Open the installer: [steam-to-steamdb-button.user.js](https://github.com/g31w0fw0rld/steam-to-steamdb-button/raw/main/steam-to-steamdb-button.user.js) (also on GreasyFork and OpenUserJS).
+2. Open the installer: [steam-to-steamdb-button.user.js](https://github.com/g31w0fw0rld/steam-to-steamdb-button/raw/main/steam-to-steamdb-button.user.js) (also on [GreasyFork](https://greasyfork.org/es-419/users/1590477-g31w) and [OpenUserJS](https://openuserjs.org/users/g31w0fw0rldgmail.com/scripts)).
 
 **Sites:** `store.steampowered.com/app/*`, `/bundle/*`, `/sub/*`
 
