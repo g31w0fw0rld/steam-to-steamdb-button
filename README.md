@@ -22,6 +22,12 @@ Userscript de Tampermonkey que añade un botón a SteamDB en las páginas de Ste
 
 **Sites:** `store.steampowered.com/app/*`, `/bundle/*`, `/sub/*`
 
+## Privacidad / Privacy
+
+**ES:** el script no hace ninguna petición de red ni guarda nada: solo lee de la URL de la página el tipo y el ID (app/bundle/sub) para construir el enlace e insertar el botón hacia SteamDB. Declara `@grant none`, así que no tiene acceso a las APIs privilegiadas del gestor de userscripts (almacenamiento, peticiones entre dominios). No se envía nada a terceros ni al autor, y solo visitas SteamDB si haces clic en el botón.
+
+**EN:** the script makes no network requests and stores nothing: it only reads the type and ID (app/bundle/sub) from the page URL to build the link and insert the SteamDB button. It declares `@grant none`, so it has no access to the userscript manager's privileged APIs (storage, cross-origin requests). Nothing is sent to third parties or to the author, and you only visit SteamDB if you click the button.
+
 ## Apoyar / Support
 
 Esto es parte de algo que estoy construyendo para crecer. Si te sirve y quieres apoyar, puedes invitarme un café en **[Ko-fi](https://ko-fi.com/g31w0fw0rld)** —solo si quieres—; y si hay una causa que lo necesite más que yo, ayúdala a ella.
