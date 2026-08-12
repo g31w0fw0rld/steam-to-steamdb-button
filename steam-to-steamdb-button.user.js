@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steam to SteamDB Button
 // @namespace    https://store.steampowered.com/
-// @version      1.2.0
+// @version      1.3.0
 // @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches the title among Steam-DRM deals, with no store-rating floor so nothing is hidden. PCGamingWiki searches the title for compatibility and fixes. The last two are title searches and say so in their tooltip. All three use Steam's own button classes.
 // @author       g31w0fw0rld
 // @license      MIT
@@ -73,28 +73,185 @@
     const DIACRITICS_REGEX = /[\u0300-\u036f]/g;
 
     // =============================================
-    // IDIOMA (solo para los tooltips: español vs. inglés)
+    // IDIOMA (solo para los tooltips)
     // =============================================
-    // Aquí sí manda el lang del documento: Steam sirve la página en el idioma que
-    // el usuario eligió en la tienda, así que es su preferencia, no la UI del sitio
-    // (al contrario de IndieGala, donde hay que ir a navigator.languages).
-    function detectLang() {
-        const docLang = (document.documentElement.getAttribute('lang') || '').toLowerCase();
-        const navLang = (navigator.language || navigator.languages?.[0] || '').toLowerCase();
-        return (docLang || navLang).startsWith('es') ? 'es' : 'en';
-    }
-
+    // Steam sirve la tienda en 30 idiomas y refleja el elegido en <html lang>, así
+    // que ese atributo ES la elección del usuario en el selector del pie: no hay
+    // que mapear a mano los códigos raros de `l=` (schinese, brazilian, latam…).
+    // Verificado pidiendo la ficha con cada parámetro:
+    //   ?l=spanish -> "es"   ?l=german    -> "de"
+    //   ?l=schinese -> "zh-cn"  ?l=brazilian -> "pt-br"
+    // Es lo contrario de IndieGala, que fija su propio lang e ignora al usuario.
+    //
+    // Las claves del diccionario son códigos BCP-47 en minúsculas.
     const I18N = {
+        en: {
+            ggTip: 'Searches the title on GG.deals with the Steam DRM filter. Being a title search, it may not hit the exact game.',
+            pcgwTip: 'Searches the title on PCGamingWiki (compatibility and fixes). Being a title search, it may not hit the exact article.'
+        },
         es: {
             ggTip: 'Busca el título en GG.deals con el filtro de DRM de Steam. Al buscar por nombre, puede no dar con el juego exacto.',
             pcgwTip: 'Busca el título en PCGamingWiki (compatibilidad y arreglos). Al buscar por nombre, puede no dar con el artículo exacto.'
         },
-        en: {
-            ggTip: 'Searches the title on GG.deals with the Steam DRM filter. Being a title search, it may not hit the exact game.',
-            pcgwTip: 'Searches the title on PCGamingWiki (compatibility and fixes). Being a title search, it may not hit the exact article.'
+        'es-419': {
+            ggTip: 'Busca el título en GG.deals con el filtro de DRM de Steam. Al buscar por nombre, puede que no encuentre el juego exacto.',
+            pcgwTip: 'Busca el título en PCGamingWiki (compatibilidad y arreglos). Al buscar por nombre, puede que no encuentre el artículo exacto.'
+        },
+        de: {
+            ggTip: 'Sucht den Titel auf GG.deals mit dem Steam-DRM-Filter. Da es eine Titelsuche ist, wird nicht immer das exakte Spiel getroffen.',
+            pcgwTip: 'Sucht den Titel auf PCGamingWiki (Kompatibilität und Fixes). Da es eine Titelsuche ist, wird nicht immer der exakte Artikel getroffen.'
+        },
+        fr: {
+            ggTip: 'Recherche le titre sur GG.deals avec le filtre DRM Steam. S’agissant d’une recherche par titre, le jeu exact peut ne pas être trouvé.',
+            pcgwTip: 'Recherche le titre sur PCGamingWiki (compatibilité et correctifs). S’agissant d’une recherche par titre, l’article exact peut ne pas être trouvé.'
+        },
+        it: {
+            ggTip: 'Cerca il titolo su GG.deals con il filtro DRM di Steam. Trattandosi di una ricerca per titolo, potrebbe non trovare il gioco esatto.',
+            pcgwTip: 'Cerca il titolo su PCGamingWiki (compatibilità e correzioni). Trattandosi di una ricerca per titolo, potrebbe non trovare la voce esatta.'
+        },
+        nl: {
+            ggTip: 'Zoekt de titel op GG.deals met het Steam-DRM-filter. Omdat het een titelzoekopdracht is, wordt niet altijd het exacte spel gevonden.',
+            pcgwTip: 'Zoekt de titel op PCGamingWiki (compatibiliteit en fixes). Omdat het een titelzoekopdracht is, wordt niet altijd het exacte artikel gevonden.'
+        },
+        pt: {
+            ggTip: 'Procura o título no GG.deals com o filtro de DRM da Steam. Sendo uma pesquisa por título, pode não encontrar o jogo exato.',
+            pcgwTip: 'Procura o título no PCGamingWiki (compatibilidade e correções). Sendo uma pesquisa por título, pode não encontrar o artigo exato.'
+        },
+        'pt-br': {
+            ggTip: 'Busca o título no GG.deals com o filtro de DRM da Steam. Por ser uma busca por título, pode não encontrar o jogo exato.',
+            pcgwTip: 'Busca o título no PCGamingWiki (compatibilidade e correções). Por ser uma busca por título, pode não encontrar o artigo exato.'
+        },
+        pl: {
+            ggTip: 'Wyszukuje tytuł w GG.deals z filtrem DRM Steam. Ponieważ to wyszukiwanie po tytule, może nie trafić w dokładną grę.',
+            pcgwTip: 'Wyszukuje tytuł w PCGamingWiki (zgodność i poprawki). Ponieważ to wyszukiwanie po tytule, może nie trafić w dokładny artykuł.'
+        },
+        ru: {
+            ggTip: 'Ищет название на GG.deals с фильтром DRM Steam. Это поиск по названию, поэтому нужная игра может не найтись.',
+            pcgwTip: 'Ищет название на PCGamingWiki (совместимость и исправления). Это поиск по названию, поэтому нужная статья может не найтись.'
+        },
+        uk: {
+            ggTip: 'Шукає назву на GG.deals із фільтром DRM Steam. Це пошук за назвою, тож потрібна гра може не знайтися.',
+            pcgwTip: 'Шукає назву на PCGamingWiki (сумісність і виправлення). Це пошук за назвою, тож потрібна стаття може не знайтися.'
+        },
+        cs: {
+            ggTip: 'Vyhledá název na GG.deals s filtrem DRM Steam. Protože jde o vyhledávání podle názvu, nemusí najít přesnou hru.',
+            pcgwTip: 'Vyhledá název na PCGamingWiki (kompatibilita a opravy). Protože jde o vyhledávání podle názvu, nemusí najít přesný článek.'
+        },
+        hu: {
+            ggTip: 'Megkeresi a címet a GG.deals oldalon a Steam DRM-szűrőjével. Mivel cím szerinti keresés, előfordulhat, hogy nem a pontos játékot találja meg.',
+            pcgwTip: 'Megkeresi a címet a PCGamingWikin (kompatibilitás és javítások). Mivel cím szerinti keresés, előfordulhat, hogy nem a pontos szócikket találja meg.'
+        },
+        ro: {
+            ggTip: 'Caută titlul pe GG.deals cu filtrul DRM Steam. Fiind o căutare după titlu, este posibil să nu găsească jocul exact.',
+            pcgwTip: 'Caută titlul pe PCGamingWiki (compatibilitate și remedieri). Fiind o căutare după titlu, este posibil să nu găsească articolul exact.'
+        },
+        bg: {
+            ggTip: 'Търси заглавието в GG.deals с филтъра за DRM на Steam. Тъй като е търсене по заглавие, може да не намери точната игра.',
+            pcgwTip: 'Търси заглавието в PCGamingWiki (съвместимост и поправки). Тъй като е търсене по заглавие, може да не намери точната статия.'
+        },
+        el: {
+            ggTip: 'Αναζητά τον τίτλο στο GG.deals με το φίλτρο DRM του Steam. Καθώς πρόκειται για αναζήτηση με τίτλο, μπορεί να μη βρει το ακριβές παιχνίδι.',
+            pcgwTip: 'Αναζητά τον τίτλο στο PCGamingWiki (συμβατότητα και διορθώσεις). Καθώς πρόκειται για αναζήτηση με τίτλο, μπορεί να μη βρει το ακριβές άρθρο.'
+        },
+        tr: {
+            ggTip: 'Başlığı GG.deals üzerinde Steam DRM filtresiyle arar. Başlığa göre arama olduğu için tam olarak aradığınız oyunu bulamayabilir.',
+            pcgwTip: 'Başlığı PCGamingWiki üzerinde arar (uyumluluk ve düzeltmeler). Başlığa göre arama olduğu için tam olarak aradığınız makaleyi bulamayabilir.'
+        },
+        sv: {
+            ggTip: 'Söker efter titeln på GG.deals med Steams DRM-filter. Eftersom det är en titelsökning hittas inte alltid exakt rätt spel.',
+            pcgwTip: 'Söker efter titeln på PCGamingWiki (kompatibilitet och fixar). Eftersom det är en titelsökning hittas inte alltid exakt rätt artikel.'
+        },
+        da: {
+            ggTip: 'Søger efter titlen på GG.deals med Steams DRM-filter. Da det er en titelsøgning, rammer den ikke altid det præcise spil.',
+            pcgwTip: 'Søger efter titlen på PCGamingWiki (kompatibilitet og rettelser). Da det er en titelsøgning, rammer den ikke altid den præcise artikel.'
+        },
+        no: {
+            ggTip: 'Søker etter tittelen på GG.deals med Steams DRM-filter. Siden det er et tittelsøk, treffer det ikke alltid det eksakte spillet.',
+            pcgwTip: 'Søker etter tittelen på PCGamingWiki (kompatibilitet og fikser). Siden det er et tittelsøk, treffer det ikke alltid den eksakte artikkelen.'
+        },
+        fi: {
+            ggTip: 'Hakee nimen GG.deals-sivustolta Steamin DRM-suodattimella. Koska kyseessä on nimihaku, se ei aina osu täsmälleen oikeaan peliin.',
+            pcgwTip: 'Hakee nimen PCGamingWikistä (yhteensopivuus ja korjaukset). Koska kyseessä on nimihaku, se ei aina osu täsmälleen oikeaan artikkeliin.'
+        },
+        ja: {
+            ggTip: 'GG.deals で Steam の DRM フィルターを使ってタイトルを検索します。タイトル検索のため、目的のゲームに正確に一致しない場合があります。',
+            pcgwTip: 'PCGamingWiki でタイトルを検索します（互換性と修正）。タイトル検索のため、目的の記事に正確に一致しない場合があります。'
+        },
+        ko: {
+            ggTip: 'GG.deals에서 Steam DRM 필터로 제목을 검색합니다. 제목 검색이므로 정확한 게임을 찾지 못할 수 있습니다.',
+            pcgwTip: 'PCGamingWiki에서 제목을 검색합니다(호환성 및 수정). 제목 검색이므로 정확한 문서를 찾지 못할 수 있습니다.'
+        },
+        'zh-cn': {
+            ggTip: '在 GG.deals 上按 Steam DRM 筛选搜索该标题。由于是按标题搜索，可能无法精确匹配到该游戏。',
+            pcgwTip: '在 PCGamingWiki 上搜索该标题（兼容性与修复）。由于是按标题搜索，可能无法精确匹配到对应条目。'
+        },
+        'zh-tw': {
+            ggTip: '在 GG.deals 上以 Steam DRM 篩選搜尋該標題。由於是以標題搜尋，可能無法精確對應到該遊戲。',
+            pcgwTip: '在 PCGamingWiki 上搜尋該標題（相容性與修正）。由於是以標題搜尋，可能無法精確對應到該條目。'
+        },
+        th: {
+            ggTip: 'ค้นหาชื่อเกมบน GG.deals ด้วยตัวกรอง DRM ของ Steam เนื่องจากเป็นการค้นหาด้วยชื่อ จึงอาจไม่ตรงกับเกมที่ต้องการพอดี',
+            pcgwTip: 'ค้นหาชื่อเกมบน PCGamingWiki (ความเข้ากันได้และการแก้ไข) เนื่องจากเป็นการค้นหาด้วยชื่อ จึงอาจไม่ตรงกับบทความที่ต้องการพอดี'
+        },
+        vi: {
+            ggTip: 'Tìm tựa đề trên GG.deals với bộ lọc DRM của Steam. Vì là tìm theo tên, kết quả có thể không phải trò chơi chính xác.',
+            pcgwTip: 'Tìm tựa đề trên PCGamingWiki (khả năng tương thích và bản sửa lỗi). Vì là tìm theo tên, kết quả có thể không phải bài viết chính xác.'
+        },
+        id: {
+            ggTip: 'Mencari judul di GG.deals dengan filter DRM Steam. Karena ini pencarian berdasarkan judul, hasilnya mungkin bukan gim yang tepat.',
+            pcgwTip: 'Mencari judul di PCGamingWiki (kompatibilitas dan perbaikan). Karena ini pencarian berdasarkan judul, hasilnya mungkin bukan artikel yang tepat.'
+        },
+        ms: {
+            ggTip: 'Mencari tajuk di GG.deals dengan penapis DRM Steam. Oleh kerana ini carian mengikut tajuk, ia mungkin tidak menemui permainan yang tepat.',
+            pcgwTip: 'Mencari tajuk di PCGamingWiki (keserasian dan pembetulan). Oleh kerana ini carian mengikut tajuk, ia mungkin tidak menemui artikel yang tepat.'
         }
     };
-    const t = I18N[detectLang()];
+
+    // Familias donde la VARIANTE cambia el texto y no basta con el idioma base.
+    // Existe para no depender de la forma exacta que escriba Steam: da igual que
+    // mande 'zh-hant' o 'zh-tw', o 'es-MX' o 'es-419'; ambos caen en el mismo
+    // diccionario. Lo no previsto se reduce a la base ('fr-CA' -> 'fr').
+    const LANG_ALIASES = {
+        'zh': 'zh-cn', 'zh-hans': 'zh-cn', 'zh-chs': 'zh-cn', 'zh-sg': 'zh-cn',
+        'zh-hant': 'zh-tw', 'zh-cht': 'zh-tw', 'zh-hk': 'zh-tw', 'zh-mo': 'zh-tw',
+        'pt-pt': 'pt',
+        'es-la': 'es-419', 'es-mx': 'es-419', 'es-ar': 'es-419', 'es-cl': 'es-419',
+        'es-co': 'es-419', 'es-pe': 'es-419', 'es-us': 'es-419',
+        'nb': 'no', 'nn': 'no'
+    };
+
+    // Reduce un código BCP-47 a una clave de I18N probando de más específico a
+    // menos: 'zh-Hant-TW' -> 'zh-hant' (alias) -> 'zh-tw'. Devuelve '' si no hay
+    // nada, para que la cascada de detectLang() pase al siguiente paso.
+    function normalizeLang(raw) {
+        const code = (raw || '').trim().toLowerCase().replace(/_/g, '-');
+        if (!code) return '';
+        const parts = code.split('-');
+        for (let n = parts.length; n >= 1; n--) {
+            const candidate = parts.slice(0, n).join('-');
+            if (LANG_ALIASES[candidate]) return LANG_ALIASES[candidate];
+            if (I18N[candidate]) return candidate;
+        }
+        return '';
+    }
+
+    // Cascada, de la señal más fiel a la menos:
+    //   1) <html lang>: el idioma que el usuario eligió en el selector de Steam.
+    //   2) navigator.languages, por si la página no lo declarara.
+    //   3) inglés.
+    function detectLang() {
+        const fromDoc = normalizeLang(document.documentElement.getAttribute('lang'));
+        if (fromDoc) return fromDoc;
+        for (const l of [navigator.language, ...(navigator.languages || [])]) {
+            const n = normalizeLang(l);
+            if (n) return n;
+        }
+        return 'en';
+    }
+
+    // Merge sobre `en`: una clave que falte en un idioma cae al inglés en vez de
+    // quedar en undefined. Así se pueden añadir idiomas incompletos sin romper nada.
+    const t = { ...I18N.en, ...(I18N[detectLang()] || {}) };
 
     // =============================================
     // FUNCIONES
