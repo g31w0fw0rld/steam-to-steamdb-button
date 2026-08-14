@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Steam to SteamDB Button
 // @namespace    https://store.steampowered.com/
-// @version      1.3.0
-// @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches the title among Steam-DRM deals, with no store-rating floor so nothing is hidden. PCGamingWiki searches the title for compatibility and fixes. The last two are title searches and say so in their tooltip. All three use Steam's own button classes.
+// @version      1.3.1
+// @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches the title among Steam-DRM deals, with no store-rating floor so nothing is hidden. PCGamingWiki searches the title for compatibility and fixes. The last two are title searches and say so in a tooltip drawn by the store's own tooltip system. All three use Steam's own button classes.
 // @author       g31w0fw0rld
 // @license      MIT
 // @match        https://store.steampowered.com/app/*
@@ -24,6 +24,12 @@
     const STEAMDB_BUTTON_ID = 'steamdbButtonContainer';
     const STYLES_ID = 'steamdbButtonStyles';
     const ICON_CLASS = 'sdbx-ico';
+    // Clase con la que la tienda viste sus propios tooltips. Es literalmente lo que
+    // cada ficha le pasa a SetupTooltips() en su DOMContentLoaded, así que pasarla
+    // aquí es lo que hace que el nuestro salga idéntico y no un div sin estilo.
+    // Su CSS (store.css) le da max-width 275px, white-space normal y word-wrap, o
+    // sea que los textos largos de aquí abajo caben sin retocarlos.
+    const STEAM_TOOLTIP_CLASS = 'store_tooltip';
 
     // GG.deals filtra por DRM con un bitmask numérico en la query, no por nombre:
     // 1 Steam, 8 GOG, 16 sin DRM, 32 otros, 128 Microsoft Store. Aquí solo interesa
@@ -300,6 +306,52 @@
         return title.normalize('NFD').replace(DIACRITICS_REGEX, '');
     }
 
+    // =============================================
+    // TOOLTIP NATIVO DE LA TIENDA
+    // =============================================
+    // Steam no dibuja los tooltips con el `title` del navegador: tiene el suyo, el
+    // plugin v_tooltip de tooltip.js, y shared_global.js lo engancha a todo lo que
+    // lleve `data-tooltip-text` (o `-html`). Poniendo ese atributo, el aviso de "esto
+    // busca por nombre" sale con la caja gris de la tienda en vez de con la del
+    // sistema operativo, que es la diferencia entre parecer parte de Steam y parecer
+    // un añadido.
+    //
+    // Su BindTooltips() deja además un MutationObserver global que engancha lo que
+    // aparezca después, así que en teoría bastaría el atributo. Pero engancha con
+    // `$J('[data-tooltip-text]', addedNodes)`, que es un `.find()`: mira los
+    // DESCENDIENTES de cada nodo añadido, no el nodo en sí. Como aquí los botones se
+    // insertan de uno en uno, un atributo puesto en el <a> quedaría fuera. Por eso va
+    // en el <span> interior —que sí es descendiente— y además se llama a BindTooltips
+    // a mano sobre el contenedor ya montado: así el enganche no depende de un detalle
+    // de su implementación.
+    //
+    // El `title` se pone siempre y solo se quita si el enganche se confirma. Es la
+    // caída para cuando esto no exista (Steam cambia su JS, o su modo de pantalla
+    // pequeña, que ignora todo lo que no lleve `data-tooltip-responsive`), y evita
+    // que se vean los dos tooltips a la vez cuando sí existe.
+
+    /**
+     * Engancha el tooltip de la tienda a los botones ya insertados y retira el
+     * `title` de los que hayan quedado enganchados. Silenciosa: si el sistema de
+     * Steam no está, cada botón se queda con su `title` y nadie se entera.
+     * @param {HTMLElement} root - Contenedor de los botones, ya en el documento.
+     */
+    function attachStoreTooltips(root) {
+        if (typeof window.BindTooltips !== 'function' || typeof window.$J !== 'function') return;
+        try {
+            window.BindTooltips(root, { tooltipCSSClass: STEAM_TOOLTIP_CLASS });
+        } catch (e) {
+            return;  // su plugin no está o cambió: se queda el title
+        }
+        root.querySelectorAll('[data-tooltip-text]').forEach((el) => {
+            // v_tooltip guarda sus ajustes en el elemento al engancharlo; si no están,
+            // no se enganchó (modo pantalla pequeña) y el title tiene que seguir ahí.
+            if (!window.$J(el).data('tooltip.settings')) return;
+            const link = el.closest('a');
+            if (link) link.removeAttribute('title');
+        });
+    }
+
     /**
      * Crea un botón con el estilo nativo de Steam (btn_black btn_medium) que abre
      * el destino en una pestaña nueva. Es un <a> real, así que funcionan el clic
@@ -316,6 +368,7 @@
         if (tooltip) a.title = tooltip;
 
         const span = document.createElement('span');
+        if (tooltip) span.dataset.tooltipText = tooltip;
         if (iconSvg) {
             const box = document.createElement('span');
             box.className = ICON_CLASS;
@@ -426,23 +479,27 @@
      * @param {string} type - Tipo de página (app, bundle, sub).
      */
     function insertButtons(buttons, container, type) {
+        let box;
         if (type === 'app') {
             // Clonar contenedor para crear sección separada debajo
-            const newContainer = container.cloneNode(true);
-            newContainer.id = STEAMDB_BUTTON_ID;
-            newContainer.innerHTML = '';
-            newContainer.style.paddingTop = 'unset';
-            container.parentNode.insertBefore(newContainer, container.nextSibling);
-            buttons.forEach((b) => newContainer.appendChild(b));
+            box = container.cloneNode(true);
+            box.id = STEAMDB_BUTTON_ID;
+            box.innerHTML = '';
+            box.style.paddingTop = 'unset';
+            container.parentNode.insertBefore(box, container.nextSibling);
+            buttons.forEach((b) => box.appendChild(b));
         } else {
             // En bundle/sub los botones van dentro de su propio bloque en vez de
             // sueltos en el contenedor: así forman su propia fila, con el mismo
             // estilo que en /app/, y no se mezclan con la caja de compra.
-            const box = document.createElement('div');
+            box = document.createElement('div');
             box.id = STEAMDB_BUTTON_ID;
             buttons.forEach((b) => box.appendChild(b));
             container.appendChild(box);
         }
+        // Con los botones ya en el documento: el tooltip de la tienda se mide al
+        // mostrarlo, pero engancharlo sobre un árbol suelto sería enganchar en el aire.
+        attachStoreTooltips(box);
     }
 
     /**
