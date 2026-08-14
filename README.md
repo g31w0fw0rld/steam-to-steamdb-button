@@ -30,7 +30,7 @@ Details worth knowing:
 - All three use Steam's own `btn_black btn_medium` classes, so they read as native Steam buttons rather than an add-on. They are real links, so middle-click and *copy link address* work.
 - They open in a new tab, leaving the store page as you left it.
 
-**Language:** the labels are brand names, the same in every language. The two tooltips are in **English or Spanish**, picked from the language Steam is serving the page in.
+**Language:** the labels are brand names, the same in every language. The two tooltips come in **29 languages** — English, Spanish, German, French, Italian, Dutch, Portuguese, Brazilian Portuguese, Polish, Russian, Ukrainian, Czech, Hungarian, Romanian, Bulgarian, Greek, Turkish, Swedish, Danish, Norwegian, Finnish, Japanese, Korean, Simplified Chinese, Traditional Chinese, Thai, Vietnamese, Indonesian and Malay — read from `<html lang>`, which is the language you picked in Steam's own selector, then from your browser if the page did not say, falling back to English.
 
 **Install:**
 1. Install [Tampermonkey](https://www.tampermonkey.net/).
@@ -56,7 +56,7 @@ Detalles que conviene saber:
 - Los tres usan las clases propias de Steam (`btn_black btn_medium`), así que parecen botones nativos y no un añadido. Son enlaces de verdad, así que funcionan el clic central y *copiar dirección del enlace*.
 - Abren en una pestaña nueva y dejan la página de la tienda como estaba.
 
-**Idioma:** las etiquetas son marcas, iguales en cualquier idioma. Los dos tooltips están en **español o inglés**, según el idioma en el que Steam esté sirviendo la página.
+**Idioma:** las etiquetas son marcas, iguales en cualquier idioma. Los dos tooltips vienen en **29 idiomas** —inglés, español, alemán, francés, italiano, neerlandés, portugués, portugués de Brasil, polaco, ruso, ucraniano, checo, húngaro, rumano, búlgaro, griego, turco, sueco, danés, noruego, finés, japonés, coreano, chino simplificado, chino tradicional, tailandés, vietnamita, indonesio y malayo—, leídos del `<html lang>`, que es el idioma que elegiste en el propio selector de Steam, y luego del navegador si la página no lo dijera, con inglés como respaldo.
 
 **Instalación:**
 1. Instala [Tampermonkey](https://www.tampermonkey.net/).
