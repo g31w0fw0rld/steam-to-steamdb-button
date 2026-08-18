@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Steam to SteamDB Button
 // @namespace    https://store.steampowered.com/
-// @version      1.3.1
-// @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches the title among Steam-DRM deals, with no store-rating floor so nothing is hidden. PCGamingWiki searches the title for compatibility and fixes. The last two are title searches and say so in a tooltip drawn by the store's own tooltip system. All three use Steam's own button classes.
+// @version      1.4.0
+// @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches Steam-DRM deals with no store-rating floor, and PCGamingWiki searches for compatibility and fixes. Both search by the English name, taken from Steam's own API, because the store translates game names and both sites index in English; both say so in a tooltip drawn by the store itself.
 // @author       g31w0fw0rld
 // @license      MIT
 // @match        https://store.steampowered.com/app/*
@@ -42,6 +42,78 @@
     const GGDEALS_MIN_RATING = '0';
     const PCGW_SEARCH_URL = 'https://www.pcgamingwiki.com/w/index.php';
 
+    // Nombre en inglés. El de la ficha NO sirve: Steam traduce el nombre del propio
+    // producto en varios idiomas —/app/2358720/ da "Black Myth: Wukong" con
+    // ?l=english, "黑神话：悟空" con ?l=schinese y "黒神話：悟空" con ?l=japanese, y el
+    // sub 847489 hace lo mismo—, mientras que GG.deals y PCGamingWiki están
+    // indexados en inglés. El slug canónico tampoco salva: se construye del nombre
+    // localizado, así que en chino la ficha se anuncia como /app/2358720/_/.
+    //
+    // Cada tipo de página tiene su endpoint, los tres MISMO-ORIGEN —por eso
+    // `@grant none` sobrevive: no hay petición cross-origin que autorizar— y los
+    // tres aceptan `l=english`. Las respuestas no tienen la misma forma, de ahí que
+    // cada entrada traiga también cómo sacarle el nombre.
+    // `pick` devuelve { name, baseName }. `baseName` es el nombre del juego al que
+    // pertenece la ficha cuando esta no es el juego suelto. PCGamingWiki documenta
+    // el juego y no el empaquetado —no tiene artículo por DLC, por paquete ni por
+    // bundle—, así que ese botón busca el juego; GG.deals sí los vende por separado
+    // y se queda con el nombre propio.
+    //
+    // Cada tipo lo saca de un sitio, y los tres del mismo JSON que ya se pedía:
+    //   /app/    `filters=basic` trae `type` y `fullgame`: el appid 2060310 responde
+    //            type "dlc" y fullgame { appid: 1091500, name: "Cyberpunk 2077" }.
+    //   /sub/    `apps` es la lista de juegos del paquete, CON su nombre. Solo sirve
+    //            si hay exactamente uno: el sub 847489 trae Black Myth: Wukong y se
+    //            resuelve, mientras que el 469 (The Orange Box) trae siete y no hay
+    //            un juego al que mandar a PCGamingWiki.
+    //   /bundle/ `appids`, misma regla del único elemento, pero SIN nombre: ese hay
+    //            que ir a buscarlo aparte (ver fetchEnglishNames).
+    const NAME_SOURCES = {
+        app: {
+            url: (id) => `/api/appdetails?appids=${id}&l=english&filters=basic`,
+            pick: (json, id) => {
+                const data = json?.[id]?.success ? json[id].data : null;
+                if (!data?.name) return null;
+                return {
+                    name: data.name,
+                    baseName: data.type === 'dlc' ? (data.fullgame?.name || '') : ''
+                };
+            }
+        },
+        sub: {
+            url: (id) => `/api/packagedetails?packageids=${id}&l=english`,
+            pick: (json, id) => {
+                const data = json?.[id]?.success ? json[id].data : null;
+                if (!data?.name) return null;
+                const apps = Array.isArray(data.apps) ? data.apps : [];
+                return {
+                    name: data.name,
+                    baseName: apps.length === 1 ? (apps[0].name || '') : ''
+                };
+            }
+        },
+        bundle: {
+            url: (id) => `/actions/ajaxresolvebundles?bundleids=${id}&cc=US&l=english`,
+            pick: (json) => {
+                const bundle = Array.isArray(json) ? json[0] : null;
+                if (!bundle?.name) return null;
+                const appids = Array.isArray(bundle.appids) ? bundle.appids : [];
+                return {
+                    name: bundle.name,
+                    baseName: '',
+                    baseAppId: appids.length === 1 ? String(appids[0]) : ''
+                };
+            }
+        }
+    };
+    // La caché evita repetir la llamada al volver a la misma ficha. El nombre en
+    // inglés de un producto ya publicado no cambia casi nunca, así que 30 días es
+    // conservador; el tope de entradas es para que no crezca sin fin.
+    const NAME_CACHE_KEY = 'steam2steamdb-en-names';
+    const NAME_CACHE_TTL = 30 * 24 * 60 * 60 * 1000;   // 30 días
+    const NAME_CACHE_MAX = 200;                        // entradas
+    const NAME_TIMEOUT_MS = 8000;
+
     // Icono SVG oficial de SteamDB
     const STEAMDB_SVG = '<svg width="16" height="16" viewBox="0 0 128 128" class="octicon octicon-steamdb" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M63.9 0C30.5 0 3.1 11.9.1 27.1l35.6 6.7c2.9-.9 6.2-1.3 9.6-1.3l16.7-10c-.2-2.5 1.3-5.1 4.7-7.2 4.8-3.1 12.3-4.8 19.9-4.8 5.2-.1 10.5.7 15 2.2 11.2 3.8 13.7 11.1 5.7 16.3-5.1 3.3-13.3 5-21.4 4.8l-22 7.9c-.2 1.6-1.3 3.1-3.4 4.5-5.9 3.8-17.4 4.7-25.6 1.9-3.6-1.2-6-3-7-4.8L2.5 38.4c2.3 3.6 6 6.9 10.8 9.8C5 53 0 59 0 65.5c0 6.4 4.8 12.3 12.9 17.1C4.8 87.3 0 93.2 0 99.6 0 115.3 28.6 128 64 128c35.3 0 64-12.7 64-28.4 0-6.4-4.8-12.3-12.9-17 8.1-4.8 12.9-10.7 12.9-17.1 0-6.5-5-12.6-13.4-17.4 8.3-5.1 13.3-11.4 13.3-18.2 0-16.5-28.7-29.9-64-29.9zm22.8 14.2c-5.2.1-10.2 1.2-13.4 3.3-5.5 3.6-3.8 8.5 3.8 11.1 7.6 2.6 18.1 1.8 23.6-1.8s3.8-8.5-3.8-11c-3.1-1-6.7-1.5-10.2-1.5zm.3 1.7c7.4 0 13.3 2.8 13.3 6.2 0 3.4-5.9 6.2-13.3 6.2s-13.3-2.8-13.3-6.2c0-3.4 5.9-6.2 13.3-6.2zM45.3 34.4c-1.6.1-3.1.2-4.6.4l9.1 1.7a10.8 5 0 1 1-8.1 9.3l-8.9-1.7c1 .9 2.4 1.7 4.3 2.4 6.4 2.2 15.4 1.5 20-1.5s3.2-7.2-3.2-9.3c-2.6-.9-5.7-1.3-8.6-1.3zM109 51v9.3c0 11-20.2 19.9-45 19.9-24.9 0-45-8.9-45-19.9v-9.2c11.5 5.3 27.4 8.6 44.9 8.6 17.6 0 33.6-3.3 45.2-8.7zm0 34.6v8.8c0 11-20.2 19.9-45 19.9-24.9 0-45-8.9-45-19.9v-8.8c11.6 5.1 27.4 8.2 45 8.2s33.5-3.1 45-8.2z"></path></svg>';
 
@@ -77,6 +149,10 @@
     const STEAM_TITLE_SUFFIX = /\s+(?:on|en|sur|auf|su|em|no|op|i|na|w)\s+Steam\s*$/i;
     // Diacríticos combinados, para quitarlos tras normalizar a NFD.
     const DIACRITICS_REGEX = /[\u0300-\u036f]/g;
+    // Sufijos de empaquetado que PCGamingWiki no usa: documenta el juego base y no
+    // tiene páginas por edición. "Definitive", "Anniversary", "Remastered" y "Game
+    // of the Year" NO se tocan: ahí sí suelen ser lanzamientos con página propia.
+    const SKU_EDITION_REGEX = /[\s:–—-]+(?:digital\s+)?(?:standard|deluxe|premium|ultimate|gold|platinum|complete|collector'?s|founder'?s)\s+edition\s*$/i;
 
     // =============================================
     // IDIOMA (solo para los tooltips)
@@ -93,123 +169,123 @@
     const I18N = {
         en: {
             ggTip: 'Searches the title on GG.deals with the Steam DRM filter. Being a title search, it may not hit the exact game.',
-            pcgwTip: 'Searches the title on PCGamingWiki (compatibility and fixes). Being a title search, it may not hit the exact article.'
+            pcgwTip: 'Searches PCGamingWiki (compatibility and fixes) for the game itself: without the edition suffix, and for DLC and packs, by their base game. Being a name search, it may not hit the exact article.'
         },
         es: {
             ggTip: 'Busca el título en GG.deals con el filtro de DRM de Steam. Al buscar por nombre, puede no dar con el juego exacto.',
-            pcgwTip: 'Busca el título en PCGamingWiki (compatibilidad y arreglos). Al buscar por nombre, puede no dar con el artículo exacto.'
+            pcgwTip: 'Busca en PCGamingWiki (compatibilidad y arreglos) el juego en sí: sin el sufijo de edición y, en DLC y paquetes, por su juego base. Al buscar por nombre, puede no dar con el artículo exacto.'
         },
         'es-419': {
             ggTip: 'Busca el título en GG.deals con el filtro de DRM de Steam. Al buscar por nombre, puede que no encuentre el juego exacto.',
-            pcgwTip: 'Busca el título en PCGamingWiki (compatibilidad y arreglos). Al buscar por nombre, puede que no encuentre el artículo exacto.'
+            pcgwTip: 'Busca en PCGamingWiki (compatibilidad y arreglos) el juego en sí: sin el sufijo de edición y, en DLC y paquetes, por su juego base. Al buscar por nombre, puede que no encuentre el artículo exacto.'
         },
         de: {
             ggTip: 'Sucht den Titel auf GG.deals mit dem Steam-DRM-Filter. Da es eine Titelsuche ist, wird nicht immer das exakte Spiel getroffen.',
-            pcgwTip: 'Sucht den Titel auf PCGamingWiki (Kompatibilität und Fixes). Da es eine Titelsuche ist, wird nicht immer der exakte Artikel getroffen.'
+            pcgwTip: 'Sucht auf PCGamingWiki (Kompatibilität und Fixes) nach dem Spiel selbst: ohne Editions-Zusatz und bei DLC und Paketen nach dem Hauptspiel. Da nach dem Namen gesucht wird, trifft es nicht immer den genauen Artikel.'
         },
         fr: {
             ggTip: 'Recherche le titre sur GG.deals avec le filtre DRM Steam. S’agissant d’une recherche par titre, le jeu exact peut ne pas être trouvé.',
-            pcgwTip: 'Recherche le titre sur PCGamingWiki (compatibilité et correctifs). S’agissant d’une recherche par titre, l’article exact peut ne pas être trouvé.'
+            pcgwTip: 'Recherche sur PCGamingWiki (compatibilité et correctifs) le jeu lui-même : sans le suffixe d\'édition et, pour les DLC et les packs, par leur jeu de base. S\'agissant d\'une recherche par nom, elle peut ne pas tomber sur l\'article exact.'
         },
         it: {
             ggTip: 'Cerca il titolo su GG.deals con il filtro DRM di Steam. Trattandosi di una ricerca per titolo, potrebbe non trovare il gioco esatto.',
-            pcgwTip: 'Cerca il titolo su PCGamingWiki (compatibilità e correzioni). Trattandosi di una ricerca per titolo, potrebbe non trovare la voce esatta.'
+            pcgwTip: 'Cerca su PCGamingWiki (compatibilità e correzioni) il gioco vero e proprio: senza il suffisso di edizione e, per DLC e pacchetti, tramite il gioco base. Trattandosi di una ricerca per nome, potrebbe non trovare l\'articolo esatto.'
         },
         nl: {
             ggTip: 'Zoekt de titel op GG.deals met het Steam-DRM-filter. Omdat het een titelzoekopdracht is, wordt niet altijd het exacte spel gevonden.',
-            pcgwTip: 'Zoekt de titel op PCGamingWiki (compatibiliteit en fixes). Omdat het een titelzoekopdracht is, wordt niet altijd het exacte artikel gevonden.'
+            pcgwTip: 'Zoekt op PCGamingWiki (compatibiliteit en fixes) naar het spel zelf: zonder het editiesuffix en, bij DLC en pakketten, op het basisspel. Omdat het op naam zoekt, vindt het niet altijd het juiste artikel.'
         },
         pt: {
             ggTip: 'Procura o título no GG.deals com o filtro de DRM da Steam. Sendo uma pesquisa por título, pode não encontrar o jogo exato.',
-            pcgwTip: 'Procura o título no PCGamingWiki (compatibilidade e correções). Sendo uma pesquisa por título, pode não encontrar o artigo exato.'
+            pcgwTip: 'Procura no PCGamingWiki (compatibilidade e correções) o próprio jogo: sem o sufixo de edição e, em DLC e pacotes, pelo jogo base. Sendo uma pesquisa por nome, pode não encontrar o artigo exato.'
         },
         'pt-br': {
             ggTip: 'Busca o título no GG.deals com o filtro de DRM da Steam. Por ser uma busca por título, pode não encontrar o jogo exato.',
-            pcgwTip: 'Busca o título no PCGamingWiki (compatibilidade e correções). Por ser uma busca por título, pode não encontrar o artigo exato.'
+            pcgwTip: 'Busca no PCGamingWiki (compatibilidade e correções) o próprio jogo: sem o sufixo de edição e, em DLC e pacotes, pelo jogo base. Por ser uma busca por nome, pode não encontrar o artigo exato.'
         },
         pl: {
             ggTip: 'Wyszukuje tytuł w GG.deals z filtrem DRM Steam. Ponieważ to wyszukiwanie po tytule, może nie trafić w dokładną grę.',
-            pcgwTip: 'Wyszukuje tytuł w PCGamingWiki (zgodność i poprawki). Ponieważ to wyszukiwanie po tytule, może nie trafić w dokładny artykuł.'
+            pcgwTip: 'Szuka w PCGamingWiki (zgodność i poprawki) samej gry: bez dopisku edycji, a w przypadku DLC i pakietów — po grze podstawowej. Ponieważ to wyszukiwanie po nazwie, może nie trafić w dokładny artykuł.'
         },
         ru: {
             ggTip: 'Ищет название на GG.deals с фильтром DRM Steam. Это поиск по названию, поэтому нужная игра может не найтись.',
-            pcgwTip: 'Ищет название на PCGamingWiki (совместимость и исправления). Это поиск по названию, поэтому нужная статья может не найтись.'
+            pcgwTip: 'Ищет в PCGamingWiki (совместимость и исправления) саму игру: без суффикса издания, а для DLC и наборов — по базовой игре. Это поиск по названию, поэтому он может не попасть в нужную статью.'
         },
         uk: {
             ggTip: 'Шукає назву на GG.deals із фільтром DRM Steam. Це пошук за назвою, тож потрібна гра може не знайтися.',
-            pcgwTip: 'Шукає назву на PCGamingWiki (сумісність і виправлення). Це пошук за назвою, тож потрібна стаття може не знайтися.'
+            pcgwTip: 'Шукає в PCGamingWiki (сумісність і виправлення) саму гру: без суфікса видання, а для DLC і наборів — за базовою грою. Це пошук за назвою, тож він може не влучити в потрібну статтю.'
         },
         cs: {
             ggTip: 'Vyhledá název na GG.deals s filtrem DRM Steam. Protože jde o vyhledávání podle názvu, nemusí najít přesnou hru.',
-            pcgwTip: 'Vyhledá název na PCGamingWiki (kompatibilita a opravy). Protože jde o vyhledávání podle názvu, nemusí najít přesný článek.'
+            pcgwTip: 'Hledá na PCGamingWiki (kompatibilita a opravy) samotnou hru: bez přípony edice a u DLC a balíčků podle základní hry. Protože jde o hledání podle názvu, nemusí trefit přesný článek.'
         },
         hu: {
             ggTip: 'Megkeresi a címet a GG.deals oldalon a Steam DRM-szűrőjével. Mivel cím szerinti keresés, előfordulhat, hogy nem a pontos játékot találja meg.',
-            pcgwTip: 'Megkeresi a címet a PCGamingWikin (kompatibilitás és javítások). Mivel cím szerinti keresés, előfordulhat, hogy nem a pontos szócikket találja meg.'
+            pcgwTip: 'A PCGamingWikin (kompatibilitás és javítások) magát a játékot keresi: kiadás-utótag nélkül, DLC-k és csomagok esetén pedig az alapjáték nevével. Mivel névre keres, nem biztos, hogy a pontos szócikket találja el.'
         },
         ro: {
             ggTip: 'Caută titlul pe GG.deals cu filtrul DRM Steam. Fiind o căutare după titlu, este posibil să nu găsească jocul exact.',
-            pcgwTip: 'Caută titlul pe PCGamingWiki (compatibilitate și remedieri). Fiind o căutare după titlu, este posibil să nu găsească articolul exact.'
+            pcgwTip: 'Caută pe PCGamingWiki (compatibilitate și remedieri) jocul în sine: fără sufixul de ediție, iar pentru DLC-uri și pachete, după jocul de bază. Fiind o căutare după nume, s-ar putea să nu nimerească articolul exact.'
         },
         bg: {
             ggTip: 'Търси заглавието в GG.deals с филтъра за DRM на Steam. Тъй като е търсене по заглавие, може да не намери точната игра.',
-            pcgwTip: 'Търси заглавието в PCGamingWiki (съвместимост и поправки). Тъй като е търсене по заглавие, може да не намери точната статия.'
+            pcgwTip: 'Търси в PCGamingWiki (съвместимост и поправки) самата игра: без наставката за издание, а при DLC и пакети — по основната игра. Това е търсене по име, така че може да не улучи точната статия.'
         },
         el: {
             ggTip: 'Αναζητά τον τίτλο στο GG.deals με το φίλτρο DRM του Steam. Καθώς πρόκειται για αναζήτηση με τίτλο, μπορεί να μη βρει το ακριβές παιχνίδι.',
-            pcgwTip: 'Αναζητά τον τίτλο στο PCGamingWiki (συμβατότητα και διορθώσεις). Καθώς πρόκειται για αναζήτηση με τίτλο, μπορεί να μη βρει το ακριβές άρθρο.'
+            pcgwTip: 'Αναζητά στο PCGamingWiki (συμβατότητα και διορθώσεις) το ίδιο το παιχνίδι: χωρίς το επίθημα έκδοσης και, για DLC και πακέτα, με το βασικό παιχνίδι. Επειδή είναι αναζήτηση με όνομα, μπορεί να μην βρει το ακριβές άρθρο.'
         },
         tr: {
             ggTip: 'Başlığı GG.deals üzerinde Steam DRM filtresiyle arar. Başlığa göre arama olduğu için tam olarak aradığınız oyunu bulamayabilir.',
-            pcgwTip: 'Başlığı PCGamingWiki üzerinde arar (uyumluluk ve düzeltmeler). Başlığa göre arama olduğu için tam olarak aradığınız makaleyi bulamayabilir.'
+            pcgwTip: 'PCGamingWiki\'de (uyumluluk ve düzeltmeler) oyunun kendisini arar: sürüm ekini kullanmadan, DLC ve paketlerde ise ana oyunun adıyla. Ada göre arama olduğu için tam makaleyi bulamayabilir.'
         },
         sv: {
             ggTip: 'Söker efter titeln på GG.deals med Steams DRM-filter. Eftersom det är en titelsökning hittas inte alltid exakt rätt spel.',
-            pcgwTip: 'Söker efter titeln på PCGamingWiki (kompatibilitet och fixar). Eftersom det är en titelsökning hittas inte alltid exakt rätt artikel.'
+            pcgwTip: 'Söker på PCGamingWiki (kompatibilitet och fixar) efter själva spelet: utan editionssuffix och, för DLC och paket, efter grundspelet. Eftersom det är en namnsökning träffar den inte alltid rätt artikel.'
         },
         da: {
             ggTip: 'Søger efter titlen på GG.deals med Steams DRM-filter. Da det er en titelsøgning, rammer den ikke altid det præcise spil.',
-            pcgwTip: 'Søger efter titlen på PCGamingWiki (kompatibilitet og rettelser). Da det er en titelsøgning, rammer den ikke altid den præcise artikel.'
+            pcgwTip: 'Søger på PCGamingWiki (kompatibilitet og rettelser) efter selve spillet: uden editionssuffiks og, for DLC og pakker, efter grundspillet. Da det er en navnesøgning, rammer den ikke altid den præcise artikel.'
         },
         no: {
             ggTip: 'Søker etter tittelen på GG.deals med Steams DRM-filter. Siden det er et tittelsøk, treffer det ikke alltid det eksakte spillet.',
-            pcgwTip: 'Søker etter tittelen på PCGamingWiki (kompatibilitet og fikser). Siden det er et tittelsøk, treffer det ikke alltid den eksakte artikkelen.'
+            pcgwTip: 'Søker på PCGamingWiki (kompatibilitet og fikser) etter selve spillet: uten edisjonssuffiks, og for DLC og pakker etter grunnspillet. Siden det er et navnesøk, treffer det ikke alltid den eksakte artikkelen.'
         },
         fi: {
             ggTip: 'Hakee nimen GG.deals-sivustolta Steamin DRM-suodattimella. Koska kyseessä on nimihaku, se ei aina osu täsmälleen oikeaan peliin.',
-            pcgwTip: 'Hakee nimen PCGamingWikistä (yhteensopivuus ja korjaukset). Koska kyseessä on nimihaku, se ei aina osu täsmälleen oikeaan artikkeliin.'
+            pcgwTip: 'Hakee PCGamingWikistä (yhteensopivuus ja korjaukset) itse pelin: ilman laitosliitettä ja DLC:iden ja pakettien kohdalla peruspelin nimellä. Koska haku tehdään nimellä, se ei aina osu oikeaan artikkeliin.'
         },
         ja: {
             ggTip: 'GG.deals で Steam の DRM フィルターを使ってタイトルを検索します。タイトル検索のため、目的のゲームに正確に一致しない場合があります。',
-            pcgwTip: 'PCGamingWiki でタイトルを検索します（互換性と修正）。タイトル検索のため、目的の記事に正確に一致しない場合があります。'
+            pcgwTip: 'PCGamingWiki（互換性と修正）でゲーム本体を検索します。エディション表記は外し、DLC やパックはベースゲーム名で検索します。名前による検索のため、正確な記事に届かないことがあります。'
         },
         ko: {
             ggTip: 'GG.deals에서 Steam DRM 필터로 제목을 검색합니다. 제목 검색이므로 정확한 게임을 찾지 못할 수 있습니다.',
-            pcgwTip: 'PCGamingWiki에서 제목을 검색합니다(호환성 및 수정). 제목 검색이므로 정확한 문서를 찾지 못할 수 있습니다.'
+            pcgwTip: 'PCGamingWiki(호환성 및 수정)에서 게임 자체를 검색합니다. 에디션 접미사는 빼고, DLC와 패키지는 기본 게임 이름으로 검색합니다. 이름 검색이라 정확한 문서를 찾지 못할 수 있습니다.'
         },
         'zh-cn': {
             ggTip: '在 GG.deals 上按 Steam DRM 筛选搜索该标题。由于是按标题搜索，可能无法精确匹配到该游戏。',
-            pcgwTip: '在 PCGamingWiki 上搜索该标题（兼容性与修复）。由于是按标题搜索，可能无法精确匹配到对应条目。'
+            pcgwTip: '在 PCGamingWiki（兼容性与修复）上搜索游戏本体：去掉版本后缀，DLC 和捆绑包则按其本体游戏搜索。由于是按名称搜索，可能无法精确对应到该条目。'
         },
         'zh-tw': {
             ggTip: '在 GG.deals 上以 Steam DRM 篩選搜尋該標題。由於是以標題搜尋，可能無法精確對應到該遊戲。',
-            pcgwTip: '在 PCGamingWiki 上搜尋該標題（相容性與修正）。由於是以標題搜尋，可能無法精確對應到該條目。'
+            pcgwTip: '在 PCGamingWiki（相容性與修正）上搜尋遊戲本體：去掉版本後綴，DLC 與組合包則以其本體遊戲搜尋。由於是以名稱搜尋，可能無法精確對應到該條目。'
         },
         th: {
             ggTip: 'ค้นหาชื่อเกมบน GG.deals ด้วยตัวกรอง DRM ของ Steam เนื่องจากเป็นการค้นหาด้วยชื่อ จึงอาจไม่ตรงกับเกมที่ต้องการพอดี',
-            pcgwTip: 'ค้นหาชื่อเกมบน PCGamingWiki (ความเข้ากันได้และการแก้ไข) เนื่องจากเป็นการค้นหาด้วยชื่อ จึงอาจไม่ตรงกับบทความที่ต้องการพอดี'
+            pcgwTip: 'ค้นหาตัวเกมบน PCGamingWiki (ความเข้ากันได้และการแก้ไข) โดยตัดคำต่อท้ายที่ระบุรุ่นออก และสำหรับ DLC กับแพ็กจะค้นด้วยชื่อเกมหลัก เนื่องจากเป็นการค้นด้วยชื่อ จึงอาจไม่ตรงกับบทความที่ต้องการ'
         },
         vi: {
             ggTip: 'Tìm tựa đề trên GG.deals với bộ lọc DRM của Steam. Vì là tìm theo tên, kết quả có thể không phải trò chơi chính xác.',
-            pcgwTip: 'Tìm tựa đề trên PCGamingWiki (khả năng tương thích và bản sửa lỗi). Vì là tìm theo tên, kết quả có thể không phải bài viết chính xác.'
+            pcgwTip: 'Tìm chính trò chơi trên PCGamingWiki (tương thích và bản sửa lỗi): bỏ hậu tố phiên bản, còn DLC và gói thì tìm theo trò chơi gốc. Vì tìm theo tên nên có thể không ra đúng bài viết.'
         },
         id: {
             ggTip: 'Mencari judul di GG.deals dengan filter DRM Steam. Karena ini pencarian berdasarkan judul, hasilnya mungkin bukan gim yang tepat.',
-            pcgwTip: 'Mencari judul di PCGamingWiki (kompatibilitas dan perbaikan). Karena ini pencarian berdasarkan judul, hasilnya mungkin bukan artikel yang tepat.'
+            pcgwTip: 'Mencari gim itu sendiri di PCGamingWiki (kompatibilitas dan perbaikan): tanpa sufiks edisi, dan untuk DLC serta paket, berdasarkan gim dasarnya. Karena mencari berdasarkan nama, hasilnya bisa meleset dari artikel yang tepat.'
         },
         ms: {
             ggTip: 'Mencari tajuk di GG.deals dengan penapis DRM Steam. Oleh kerana ini carian mengikut tajuk, ia mungkin tidak menemui permainan yang tepat.',
-            pcgwTip: 'Mencari tajuk di PCGamingWiki (keserasian dan pembetulan). Oleh kerana ini carian mengikut tajuk, ia mungkin tidak menemui artikel yang tepat.'
+            pcgwTip: 'Mencari permainan itu sendiri di PCGamingWiki (keserasian dan pembaikan): tanpa akhiran edisi, dan bagi DLC serta pakej, mengikut permainan asasnya. Kerana ia carian nama, ia mungkin tidak menemui artikel yang tepat.'
         }
     };
 
@@ -304,6 +380,103 @@
      */
     function normalizeForGgDeals(title) {
         return title.normalize('NFD').replace(DIACRITICS_REGEX, '');
+    }
+
+    // =============================================
+    // NOMBRE EN INGLÉS (API de la tienda)
+    // =============================================
+
+    function readNameCache(key) {
+        try {
+            const all = JSON.parse(localStorage.getItem(NAME_CACHE_KEY) || '{}');
+            const hit = all[key];
+            if (hit && Date.now() - hit.ts < NAME_CACHE_TTL) return hit.names;
+        } catch (e) { /* caché corrupta: se ignora y se vuelve a pedir */ }
+        return null;
+    }
+
+    function writeNameCache(key, names) {
+        try {
+            let all = {};
+            try { all = JSON.parse(localStorage.getItem(NAME_CACHE_KEY) || '{}'); } catch (e) { all = {}; }
+            all[key] = { names, ts: Date.now() };
+            const keys = Object.keys(all);
+            if (keys.length > NAME_CACHE_MAX) {
+                keys.sort((a, b) => (all[a].ts || 0) - (all[b].ts || 0))
+                    .slice(0, keys.length - NAME_CACHE_MAX)
+                    .forEach((k) => delete all[k]);
+            }
+            localStorage.setItem(NAME_CACHE_KEY, JSON.stringify(all));
+        } catch (e) { console.error('(steam2steamdb): writeNameCache error:', e); }
+    }
+
+    /**
+     * Nombres en inglés del producto, pedidos a la API de la propia tienda. Con
+     * corte por tiempo: una petición colgada dejaría los enlaces sin corregir y sin
+     * nada en consola que lo explique. Devuelve null ante cualquier fallo, que es lo
+     * que deja los botones con el título de la ficha.
+     * @param {string} type - Tipo de página (app, bundle, sub).
+     * @param {string} id - ID numérico del producto en Steam.
+     * @returns {Promise<{name: string, baseName: string}|null>} Nombre propio y, si
+     *     es un DLC, el del juego base; null si no se pudo obtener.
+     */
+    async function fetchEnglishNames(type, id) {
+        const source = NAME_SOURCES[type];
+        if (!source) return null;
+
+        const key = `${type}:${id}`;
+        const cached = readNameCache(key);
+        if (cached) return cached;
+
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), NAME_TIMEOUT_MS);
+        try {
+            const res = await fetch(source.url(id), { credentials: 'omit', signal: ctrl.signal });
+            if (!res.ok) return null;
+            const picked = source.pick(await res.json(), id);
+            if (!picked) return null;
+            const names = {
+                name: cleanApiName(picked.name),
+                baseName: cleanApiName(picked.baseName)
+            };
+            if (!names.name) return null;
+            // Un bundle de un solo juego sí tiene a quién mandar a PCGamingWiki,
+            // pero ajaxresolvebundles solo da el appid: el nombre hay que pedirlo.
+            if (!names.baseName && picked.baseAppId) {
+                names.baseName = await fetchAppName(picked.baseAppId);
+            }
+            writeNameCache(key, names);
+            return names;
+        } catch (e) {
+            console.warn('(steam2steamdb): nombre en inglés sin respuesta:',
+                e.name === 'AbortError' ? 'tiempo agotado' : e.message);
+            return null;
+        } finally { clearTimeout(timer); }
+    }
+
+    /**
+     * Nombre en inglés de una app suelta. Solo lo usa el caso del bundle de un
+     * único juego, que llega sin nombre. Silencioso: sin él, PCGamingWiki se queda
+     * con el nombre del bundle.
+     * @param {string} appId - AppID del juego.
+     * @returns {Promise<string>} Nombre en inglés, o cadena vacía.
+     */
+    async function fetchAppName(appId) {
+        const cached = readNameCache(`app:${appId}`);
+        if (cached) return cached.name || '';
+        try {
+            const res = await fetch(NAME_SOURCES.app.url(appId), { credentials: 'omit' });
+            if (!res.ok) return '';
+            const picked = NAME_SOURCES.app.pick(await res.json(), appId);
+            return picked ? cleanApiName(picked.name) : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    /** Misma limpieza que getGameTitle() aplica al nombre de la ficha. */
+    function cleanApiName(name) {
+        return (name || '').replace(TRADEMARK_REGEX, '').replace(/\s+/g, ' ').trim();
     }
 
     // =============================================
@@ -403,19 +576,50 @@
     }
 
     /**
-     * Botón a la búsqueda de GG.deals por título, filtrada al DRM de Steam.
+     * URL de la búsqueda de GG.deals por título, filtrada al DRM de Steam. Está
+     * aparte del botón porque el href se reescribe cuando llega el nombre en inglés.
      * @param {string} title - Título limpio del juego.
-     * @returns {HTMLAnchorElement} El botón de GG.deals.
+     * @returns {string} La URL de búsqueda.
      */
-    function createGgDealsButton(title) {
+    function ggDealsUrl(title) {
         const params = new URLSearchParams({
             drm: GGDEALS_STEAM_DRM,
             minRating: GGDEALS_MIN_RATING,
             title: normalizeForGgDeals(title)
         });
+        return `${GGDEALS_SEARCH_URL}?${params}`;
+    }
+
+    /**
+     * URL de la búsqueda de PCGamingWiki por título. Aparte por el mismo motivo
+     * que ggDealsUrl().
+     * @param {string} title - Título limpio del juego.
+     * @returns {string} La URL de búsqueda.
+     */
+    function pcgwUrl(title) {
+        return `${PCGW_SEARCH_URL}?${new URLSearchParams({ search: pcgwSearchTitle(title) })}`;
+    }
+
+    /**
+     * Recorta lo que PCGamingWiki no indexa: los sufijos de edición. Si el recorte
+     * dejara la cadena vacía —un producto llamado solo "Deluxe Edition"— se queda
+     * el título entero, que es peor buscar que nada.
+     * @param {string} title - Título del producto.
+     * @returns {string} Título sin el sufijo de edición.
+     */
+    function pcgwSearchTitle(title) {
+        return title.replace(SKU_EDITION_REGEX, '').trim() || title;
+    }
+
+    /**
+     * Botón a la búsqueda de GG.deals por título, filtrada al DRM de Steam.
+     * @param {string} title - Título limpio del juego.
+     * @returns {HTMLAnchorElement} El botón de GG.deals.
+     */
+    function createGgDealsButton(title) {
         return createBrandButton({
             label: 'GG.deals',
-            url: `${GGDEALS_SEARCH_URL}?${params}`,
+            url: ggDealsUrl(title),
             iconUrl: GGDEALS_ICON_URL,
             tooltip: t.ggTip
         });
@@ -427,10 +631,9 @@
      * @returns {HTMLAnchorElement} El botón de PCGamingWiki.
      */
     function createPcgwButton(title) {
-        const params = new URLSearchParams({ search: title });
         return createBrandButton({
             label: 'PCGamingWiki',
-            url: `${PCGW_SEARCH_URL}?${params}`,
+            url: pcgwUrl(title),
             iconSvg: PCGW_ICON_SVG,
             tooltip: t.pcgwTip
         });
@@ -521,9 +724,31 @@
         // lista bundles y paquetes, así que la búsqueda por título tiene sentido
         // más allá de /app/. Si no hay título legible, quedan solo SteamDB.
         const title = getGameTitle();
-        if (title) buttons.push(createGgDealsButton(title), createPcgwButton(title));
+        let ggButton = null;
+        let pcgwButton = null;
+        if (title) {
+            ggButton = createGgDealsButton(title);
+            pcgwButton = createPcgwButton(title);
+            buttons.push(ggButton, pcgwButton);
+        }
 
         insertButtons(buttons, container, type);
+
+        // El nombre en inglés se pide DESPUÉS de pintar, y solo reescribe los dos
+        // href. Esperarlo antes retrasaría también el botón de SteamDB, y dejaría
+        // la ficha sin botones cada vez que la API no contestara; así el peor caso
+        // es quedarse con el título de la página, que es exactamente lo de antes.
+        // La ventana en la que un clic muy rápido usaría el título localizado dura
+        // una petición, y solo la primera vez: después sale de la caché.
+        if (ggButton && pcgwButton) {
+            fetchEnglishNames(type, id).then((names) => {
+                if (!names) return;
+                ggButton.href = ggDealsUrl(names.name);
+                // En un DLC, PCGamingWiki va al juego base: no tiene artículo por
+                // DLC, los documenta dentro del juego al que pertenecen.
+                pcgwButton.href = pcgwUrl(names.baseName || names.name);
+            });
+        }
     }
 
     // =============================================
