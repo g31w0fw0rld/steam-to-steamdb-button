@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steam to SteamDB Button
 // @namespace    https://store.steampowered.com/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches Steam-DRM deals with no store-rating floor, and PCGamingWiki searches for compatibility and fixes. Both search by the English name, taken from Steam's own API, because the store translates game names and both sites index in English; both say so in a tooltip drawn by the store itself.
 // @author       g31w0fw0rld
 // @license      MIT
@@ -21,7 +21,11 @@
     // =============================================
     const STEAMDB_BASE_URL = 'https://steamdb.info/';
     const PATH_REGEX = /\/(app|bundle|sub)\/(\d+)/;
+    // El id se conserva por continuidad, pero SOLO lo lleva la primera fila: en
+    // /sub/ y /bundle/ hay dos zonas de compra y por tanto dos filas, y repetir un id
+    // sería HTML inválido. Lo que viste el estilo es la clase, que sí llevan todas.
     const STEAMDB_BUTTON_ID = 'steamdbButtonContainer';
+    const ROW_CLASS = 'sdbx-row';
     const STYLES_ID = 'steamdbButtonStyles';
     const ICON_CLASS = 'sdbx-ico';
     // Clase con la que la tienda viste sus propios tooltips. Es literalmente lo que
@@ -128,10 +132,17 @@
     // Mapa de contenedores según el tipo de página de Steam
     // - app: usa 'queueActionsCtn' (se clona para crear sección separada)
     // - bundle/sub: usa 'game_area_purchase_top' (se añade directamente)
+    // Las fichas de /sub/ y /bundle/ traen DOS zonas de compra, no una: la de arriba
+    // y otra al final, después del listado de lo que incluye el lote. Poner los
+    // botones solo en la primera dejaba la de abajo pelada —y peor: la de arriba
+    // lleva `tablet_hidden`, así que en pantallas estrechas Steam la esconde y la
+    // única que queda es justo la que no los tenía. Verificado en el HTML del sub 469
+    // y del bundle 232, los dos con este par de ids. En /app/ el ancla es otra cosa
+    // (la fila de acciones de la cola) y ahí sigue habiendo una sola.
     const CONTAINER_IDS = {
-        app: 'queueActionsCtn',
-        bundle: 'game_area_purchase_top',
-        sub: 'game_area_purchase_top'
+        app: ['queueActionsCtn'],
+        bundle: ['game_area_purchase_top', 'game_area_purchase_bottom'],
+        sub: ['game_area_purchase_top', 'game_area_purchase_bottom']
     };
 
     // Fuentes del nombre, en orden de preferencia: el encabezado del hub existe en
@@ -653,8 +664,8 @@
         const style = document.createElement('style');
         style.id = STYLES_ID;
         style.textContent = `
-            #${STEAMDB_BUTTON_ID} { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; }
-            #${STEAMDB_BUTTON_ID} .btn_medium { margin: 0; }
+            .${ROW_CLASS} { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; }
+            .${ROW_CLASS} .btn_medium { margin: 0; }
             .${ICON_CLASS} { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; flex: 0 0 auto; }
             img.${ICON_CLASS} { width: 16px; height: 16px; object-fit: contain; }
         `;
@@ -662,14 +673,15 @@
     }
 
     /**
-     * Obtiene el contenedor DOM donde debe insertarse el botón,
-     * según el tipo de página de Steam.
+     * Contenedores donde deben insertarse los botones, según el tipo de página.
+     * Devuelve solo los que existan: una ficha puede no traer los dos.
      * @param {string} type - Tipo de página (app, bundle, sub).
-     * @returns {HTMLElement|null} El contenedor encontrado o null.
+     * @returns {HTMLElement[]} Los contenedores encontrados, en orden.
      */
-    function getContainer(type) {
-        const containerId = CONTAINER_IDS[type];
-        return containerId ? document.getElementById(containerId) : null;
+    function getContainers(type) {
+        return (CONTAINER_IDS[type] || [])
+            .map((containerId) => document.getElementById(containerId))
+            .filter(Boolean);
     }
 
     /**
@@ -680,13 +692,13 @@
      * @param {HTMLAnchorElement[]} buttons - Los botones a insertar, en orden.
      * @param {HTMLElement} container - El contenedor DOM de destino.
      * @param {string} type - Tipo de página (app, bundle, sub).
+     * @param {boolean} isFirst - Si es la primera fila de la página (la que lleva el id).
      */
-    function insertButtons(buttons, container, type) {
+    function insertButtons(buttons, container, type, isFirst) {
         let box;
         if (type === 'app') {
             // Clonar contenedor para crear sección separada debajo
             box = container.cloneNode(true);
-            box.id = STEAMDB_BUTTON_ID;
             box.innerHTML = '';
             box.style.paddingTop = 'unset';
             container.parentNode.insertBefore(box, container.nextSibling);
@@ -696,10 +708,11 @@
             // sueltos en el contenedor: así forman su propia fila, con el mismo
             // estilo que en /app/, y no se mezclan con la caja de compra.
             box = document.createElement('div');
-            box.id = STEAMDB_BUTTON_ID;
             buttons.forEach((b) => box.appendChild(b));
             container.appendChild(box);
         }
+        box.classList.add(ROW_CLASS);
+        if (isFirst) box.id = STEAMDB_BUTTON_ID;
         // Con los botones ya en el documento: el tooltip de la tienda se mide al
         // mostrarlo, pero engancharlo sobre un árbol suelto sería enganchar en el aire.
         attachStoreTooltips(box);
@@ -714,25 +727,34 @@
         if (!pageInfo) return;
 
         const { type, id } = pageInfo;
-        const container = getContainer(type);
-        if (!container) return;
+        const containers = getContainers(type);
+        if (!containers.length) return;
 
         injectStyles();
-        const buttons = [createSteamDBButton(type, id)];
 
         // GG.deals y PCGamingWiki en los tres tipos de página: GG.deals también
         // lista bundles y paquetes, así que la búsqueda por título tiene sentido
         // más allá de /app/. Si no hay título legible, quedan solo SteamDB.
         const title = getGameTitle();
-        let ggButton = null;
-        let pcgwButton = null;
-        if (title) {
-            ggButton = createGgDealsButton(title);
-            pcgwButton = createPcgwButton(title);
-            buttons.push(ggButton, pcgwButton);
-        }
 
-        insertButtons(buttons, container, type);
+        // Un juego de botones POR contenedor: son nodos del DOM, así que los mismos
+        // no se pueden insertar en dos sitios —al añadirlos al segundo desaparecerían
+        // del primero—. Se guardan aparte los de búsqueda de todas las filas para
+        // poder reescribirles el href de una vez cuando llegue el nombre en inglés.
+        const ggButtons = [];
+        const pcgwButtons = [];
+
+        containers.forEach((container, i) => {
+            const buttons = [createSteamDBButton(type, id)];
+            if (title) {
+                const gg = createGgDealsButton(title);
+                const pcgw = createPcgwButton(title);
+                ggButtons.push(gg);
+                pcgwButtons.push(pcgw);
+                buttons.push(gg, pcgw);
+            }
+            insertButtons(buttons, container, type, i === 0);
+        });
 
         // El nombre en inglés se pide DESPUÉS de pintar, y solo reescribe los dos
         // href. Esperarlo antes retrasaría también el botón de SteamDB, y dejaría
@@ -740,13 +762,15 @@
         // es quedarse con el título de la página, que es exactamente lo de antes.
         // La ventana en la que un clic muy rápido usaría el título localizado dura
         // una petición, y solo la primera vez: después sale de la caché.
-        if (ggButton && pcgwButton) {
+        if (ggButtons.length) {
             fetchEnglishNames(type, id).then((names) => {
                 if (!names) return;
-                ggButton.href = ggDealsUrl(names.name);
+                const ggHref = ggDealsUrl(names.name);
                 // En un DLC, PCGamingWiki va al juego base: no tiene artículo por
                 // DLC, los documenta dentro del juego al que pertenecen.
-                pcgwButton.href = pcgwUrl(names.baseName || names.name);
+                const pcgwHref = pcgwUrl(names.baseName || names.name);
+                ggButtons.forEach((b) => { b.href = ggHref; });
+                pcgwButtons.forEach((b) => { b.href = pcgwHref; });
             });
         }
     }
