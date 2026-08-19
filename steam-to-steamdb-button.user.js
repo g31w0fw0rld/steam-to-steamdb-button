@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Steam to SteamDB Button
 // @namespace    https://store.steampowered.com/
-// @version      1.4.1
+// @version      1.4.2
 // @description  Adds three buttons to Steam game, bundle and package pages. SteamDB links to that exact product (price history, technical data, package contents, change tracking), built from the ID in the URL. GG.deals searches Steam-DRM deals with no store-rating floor, and PCGamingWiki searches for compatibility and fixes. Both search by the English name, taken from Steam's own API, because the store translates game names and both sites index in English; both say so in a tooltip drawn by the store itself.
 // @author       g31w0fw0rld
 // @license      MIT
@@ -658,13 +658,22 @@
      * segunda línea en vez de desbordar. Y justify-content explícito porque en /app/
      * el contenedor es un clon de queueActionsCtn: conserva sus clases, y con ellas
      * el space-between de Steam, que separaba los tres botones a los extremos.
+     *
+     * La clase va DUPLICADA en el selector de la fila a propósito. La regla de Steam
+     * es `.queue_ctn .queue_actions_ctn` (game.css), con especificidad 0,2,0: con un
+     * solo `.sdbx-row` (0,1,0) gana Steam y los botones se van a los extremos. Se ve
+     * solo en las fichas donde queueActionsCtn cuelga de `.queue_ctn` —las no
+     * adquiridas, las que traen el botón de lista de deseados—, así que una ficha de
+     * un juego propio no destapa el fallo. Duplicar la clase empata a 0,2,0 y este
+     * <style> va al head en tiempo de ejecución, después de las hojas de Steam, de
+     * modo que a igual especificidad manda el orden y manda esta.
      */
     function injectStyles() {
         if (document.getElementById(STYLES_ID)) return;
         const style = document.createElement('style');
         style.id = STYLES_ID;
         style.textContent = `
-            .${ROW_CLASS} { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; }
+            .${ROW_CLASS}.${ROW_CLASS} { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; }
             .${ROW_CLASS} .btn_medium { margin: 0; }
             .${ICON_CLASS} { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; flex: 0 0 auto; }
             img.${ICON_CLASS} { width: 16px; height: 16px; object-fit: contain; }
